@@ -1,6 +1,18 @@
-# PNL diffusion pipeline
+Table of Contents
+=================
+
+   * [PNL diffusion pipeline](#pnl-diffusion-pipeline)
+   * [Specifying input](#specifying-input)
+      * [1. caselist](#1-caselist)
+      * [2. config file](#2-config-file)
+   * [Output](#output)
+   * [Running](#running)
+   * [Dependencies](#dependencies)
+
 
 ![](pnlpipe_doc/pnl-diffusion-dag.png)
+
+# PNL diffusion pipeline
 
 PNL diffusion pipeline can be elegantly interfaced with MMVT. The diffusion pipeline 
 requires either of:

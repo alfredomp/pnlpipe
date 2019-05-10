@@ -17,10 +17,11 @@ log = IndentedLoggerAdapter(logger, indent_char='.')
 
 # defaults that pipelines can use
 bet_threshold = 0.1
-BRAINSTools_hash = '81a409d'
+BRAINSTools_hash = '81a409d7'
 trainingDataT1AHCC_hash = 'd6e5990'
 FreeSurfer_version = '5.3.0'
 UKFTractography_hash = 'ce12942'
+dcm2niix_hash= '54cfd51'
 tract_querier_hash = 'cff29a3'
 ukfparams = ["--Ql", 70, "--Qm", 0.001, "--Rs", 0.015, "--numTensor", 2,
              "--recordLength", 1.7, "--seedFALimit", 0.18, "--seedsPerVoxel",
@@ -61,6 +62,10 @@ class NrrdOutput(caseidnode.AutoOutput):
     def ext(self):
         return '.nrrd'
 
+class NhdrOutput(caseidnode.AutoOutput):
+    @property
+    def ext(self):
+        return '.nhdr'
 
 class NiftiOutput(caseidnode.AutoOutput):
     @property
@@ -105,6 +110,29 @@ class DwiXc(NrrdOutput):
             alignAndCenter_py['-i', inputnrrd, '-o', self.output()] & LOG
 
 
+@node(params=['dcm2niix_hash', 'BRAINSTools_hash'], deps=['dicom'])
+class DicomNhdr(NrrdOutput):
+    """ Dicom to NRRD conversion using dcm2niix. """
+
+    def static_build(self):
+        with soft.dcm2niix.env(self.dcm2niix_hash), BRAINSTools.env(self.BRAINSTools_hash), local.tempdir() as tmpdir:
+            from plumbum.cmd import dcm2niix, unu
+            tmpdir = local.path(tmpdir)
+            dcm2niix['-o', tmpdir, '-z', 'y', '-e', 'y', self.dicom] & FG
+
+            # dcm2niix may output multiple nhdrs, process one of them only
+            nhdrs= tmpdir.glob('*.nhdr')
+            n= len(nhdrs)
+            if n>1:
+                print(f'There are {n} converted NHDR files. Which one would you like to use?')
+                for i, file in enumerate(nhdrs):
+                    print(i, file)
+                keep= int(input("Enter index of file (i.e 0,1,2 etc.): "))
+                for i, file in enumerate(nhdrs):
+                    if i==keep:
+                        unu["save", "-i", file, "-e", "gzip", "-f", "nrrd", "-o", self.output()] & FG
+
+
 @node(params=['BRAINSTools_hash'], deps=['dwi'])
 class DwiEd(NrrdOutput):
     """ Eddy current correction. Accepts nrrd only. """
@@ -117,8 +145,7 @@ class DwiEd(NrrdOutput):
 @node(params=['bet_threshold', 'BRAINSTools_hash'], deps=['dwi'])
 class DwiMaskBet(NrrdOutput):
     def static_build(self):
-        with BRAINSTools.env(self.BRAINSTools_hash), \
-             local.tempdir() as tmpdir:
+        with BRAINSTools.env(self.BRAINSTools_hash):
             bet_py('--force', '-f', self.bet_threshold, '-i', self.dwi, '-o',
                    self.output())
 
@@ -142,8 +169,8 @@ class DwiEpiMask(NrrdOutput):
     """Generates a mask from an EPI corrected DWI, which is already skullstripped."""
 
     def static_build(self):
-        from plumbum.cmd import unu
         with BRAINSTools.env(self.BRAINSTools_hash):
+            from plumbum.cmd import unu
             slicecmd = unu["slice", "-a", "3", "-p", 0, "-i", self.dwi]
             binarizecmd = unu["3op", "ifelse", "-", 1, 0]
             gzipcmd = unu["save", "-e", "gzip", "-f", "nrrd", "-o", self.output()]
@@ -394,7 +421,7 @@ def summarize_tractmeasures(pipename, extra_flags=None):
     dfs = []
     for paramid, combo, caseids in read_grouped_combos(pipename):
         pipelines = [make_pipeline(pipename, combo, caseid) for caseid in caseids]
-        csvs = ([pipeline['tractmeasures'].output().__str__() for pipeline in pipelines if \
+        csvs = ([pipeline['tractmeasures'].output().__str__() for pipeline in pipelines if
                      pipeline['tractmeasures'].output().exists()])
         if csvs:
             df = pd.concat(filter(lambda x: x is not None, (pd.read_csv(csv) for csv in csvs)))
